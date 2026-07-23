@@ -53,16 +53,21 @@ class RWBits:
         self.lsb_first = lsb_first
         self.sign_bit = (1 << (num_bits - 1)) if signed else 0
 
+        if lsb_first:
+            self._byte_order = tuple(range(register_width - 1, -1, -1))
+            self._reversed_byte_order = tuple(range(register_width))
+        else:
+            self._byte_order = tuple(range(register_width))
+            self._reversed_byte_order = tuple(range(register_width - 1, -1, -1))
+
     def __get__(self, obj, objtype=None):
         # read data from register
         obj.register_accessor.read_register(self.address, self.buffer)
 
         # read the bytes into a single variable, most significant byte first
         reg = 0
-        order = range(len(self.buffer) - 1, -1, -1)
-        if not self.lsb_first:
-            order = tuple(reversed(order))
-        for i in order:
+
+        for i in self._byte_order:
             reg = (reg << 8) | self.buffer[i]
 
         # extract integer value from specified bits
@@ -80,17 +85,15 @@ class RWBits:
 
         # shift in integer value to register data
         reg = 0
-        order = range(len(self.buffer) - 1, -1, -1)
-        if not self.lsb_first:
-            order = tuple(reversed(order))
-        for i in order:
+
+        for i in self._byte_order:
             reg = (reg << 8) | self.buffer[i]
         shifted_value = value << self.lowest_bit
         reg &= ~self.bit_mask  # mask off the bits we're about to change
         reg |= shifted_value  # then or in our new value
 
         # put data from reg back into buffer, least significant byte first
-        for i in reversed(order):
+        for i in self._reversed_byte_order:
             self.buffer[i] = reg & 0xFF
             reg >>= 8
 

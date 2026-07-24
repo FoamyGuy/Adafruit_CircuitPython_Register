@@ -53,12 +53,14 @@ class RWBits:
         self.lsb_first = lsb_first
         self.sign_bit = (1 << (num_bits - 1)) if signed else 0
 
+        up = tuple(range(register_width))
+        down = tuple(range(register_width - 1, -1, -1))
         if lsb_first:
-            self._byte_order = tuple(range(register_width - 1, -1, -1))
-            self._reversed_byte_order = tuple(range(register_width))
+            self._byte_order = down
+            self._reversed_byte_order = up
         else:
-            self._byte_order = tuple(range(register_width))
-            self._reversed_byte_order = tuple(range(register_width - 1, -1, -1))
+            self._byte_order = up
+            self._reversed_byte_order = down
 
     def __get__(self, obj, objtype=None):
         # read data from register

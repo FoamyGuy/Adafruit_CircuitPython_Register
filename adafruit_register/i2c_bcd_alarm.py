@@ -68,6 +68,13 @@ class BCDAlarmTimeRegister:
     * "weekly", once a week when ``tm_wday``, ``tm_hour``, ``tm_min``, ``tm_sec`` match
     * "monthly", once a month when ``tm_mday``, ``tm_hour``, ``tm_min``, ``tm_sec`` match
 
+    Alarm registers do not store a complete calendar date. When reading a value,
+    ``tm_year`` and ``tm_mon`` are placeholders set to 2017 and January so a valid
+    ``time.struct_time`` can be returned. For a weekly alarm, ``tm_mday`` is also
+    synthesized from ``tm_wday``; for a monthly alarm, ``tm_wday`` is synthesized
+    from ``tm_mday``. Use the returned frequency and only the fields listed for that
+    frequency above as hardware-backed alarm settings.
+
     :param int register_address: The register address to start the read
     :param bool has_seconds: True if the alarm can happen minutely.
     :param bool weekday_shared: True if weekday and day share the same register

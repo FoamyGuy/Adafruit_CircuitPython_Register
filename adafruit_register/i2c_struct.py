@@ -68,25 +68,22 @@ class UnaryStruct:
 
     def __init__(self, register_address: int, struct_format: str) -> None:
         self.format = struct_format
-        self.address = register_address
+        self.buffer = bytearray(1 + struct.calcsize(self.format))
+        self.buffer[0] = register_address
 
     def __get__(
         self,
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Any:
-        buf = bytearray(1 + struct.calcsize(self.format))
-        buf[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(buf, buf, out_end=1, in_start=1)
-        return struct.unpack_from(self.format, buf, 1)[0]
+            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+        return struct.unpack_from(self.format, self.buffer, 1)[0]
 
     def __set__(self, obj: I2CDeviceDriver, value: Any) -> None:
-        buf = bytearray(1 + struct.calcsize(self.format))
-        buf[0] = self.address
-        struct.pack_into(self.format, buf, 1, value)
+        struct.pack_into(self.format, self.buffer, 1, value)
         with obj.i2c_device as i2c:
-            i2c.write(buf)
+            i2c.write(self.buffer)
 
 
 class ROUnaryStruct(UnaryStruct):

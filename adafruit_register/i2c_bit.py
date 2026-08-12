@@ -21,6 +21,17 @@ try:
 except ImportError:
     pass
 
+# Module-wide I/O buffer shared by every descriptor in this file: [address byte][data ...].
+# Grown *in place* with .extend() (never rebound), so no `global` statement is needed and PLW0603
+# does not fire. Sized to the widest register declared in the image.
+_BUFFER = bytearray(1)
+
+
+def _fit(size: int) -> None:
+    """Grow the shared buffer in place to hold a 1-byte address + ``size`` data bytes."""
+    if len(_BUFFER) < 1 + size:
+        _BUFFER.extend(bytes(1 + size - len(_BUFFER)))
+
 
 class RWBit:
     """
@@ -43,8 +54,9 @@ class RWBit:
         lsb_first: bool = True,
     ) -> None:
         self.bit_mask = 1 << (bit % 8)  # the bitmask *within* the byte!
-        self.buffer = bytearray(1 + register_width)
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.register_width = register_width
+        _fit(register_width)
         if lsb_first:
             self.byte = bit // 8 + 1  # the byte number within the buffer
         else:
@@ -55,18 +67,24 @@ class RWBit:
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> bool:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
-        return bool(self.buffer[self.byte] & self.bit_mask)
+            i2c.write_then_readinto(
+                _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.register_width
+            )
+        return bool(_BUFFER[self.byte] & self.bit_mask)
 
     def __set__(self, obj: I2CDeviceDriver, value: bool) -> None:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+            i2c.write_then_readinto(
+                _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.register_width
+            )
             if value:
-                self.buffer[self.byte] |= self.bit_mask
+                _BUFFER[self.byte] |= self.bit_mask
             else:
-                self.buffer[self.byte] &= ~self.bit_mask
-            i2c.write(self.buffer)
+                _BUFFER[self.byte] &= ~self.bit_mask
+            i2c.write(_BUFFER, end=1 + self.register_width)
 
 
 class ROBit(RWBit):

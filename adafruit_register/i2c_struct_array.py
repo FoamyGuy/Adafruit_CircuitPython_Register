@@ -23,6 +23,17 @@ try:
 except ImportError:
     pass
 
+# Module-wide I/O buffer shared by every struct array in this file: [address byte][element data].
+# Grown *in place* with .extend() (never rebound), so no `global` statement is needed and PLW0603
+# does not fire. Sized to the widest array element declared in the image.
+_BUFFER = bytearray(1)
+
+
+def _fit(size: int) -> None:
+    """Grow the shared buffer in place to hold a 1-byte address + ``size`` data bytes."""
+    if len(_BUFFER) < 1 + size:
+        _BUFFER.extend(bytes(1 + size - len(_BUFFER)))
+
 
 class _BoundStructArray:
     """
@@ -46,16 +57,16 @@ class _BoundStructArray:
         self.obj = obj
         self.count = count
 
-    def _get_buffer(self, index: int) -> bytearray:
-        """Shared bounds checking and buffer creation."""
+    def _get_buffer(self, index: int) -> memoryview:
+        """Shared bounds checking and buffer setup."""
         if not 0 <= index < self.count:
             raise IndexError()
         size = struct.calcsize(self.format)
-        # We create the buffer every time instead of keeping the buffer (which is 32 bytes at least)
-        # around forever.
-        buf = bytearray(size + 1)
-        buf[0] = self.first_register + size * index
-        return buf
+        # A single module-wide buffer, grown in place to the widest element, is shared across every
+        # struct array and reused on each access -- one persistent buffer rather than a fresh
+        # allocation on every access or a separate buffer kept per descriptor.
+        _BUFFER[0] = self.first_register + size * index
+        return memoryview(_BUFFER)[: size + 1]
 
     def __getitem__(self, index: int) -> Tuple:
         buf = self._get_buffer(index)
@@ -95,6 +106,7 @@ class StructArray:
         self.address = register_address
         self.count = count
         self.array_id = f"_structarray{register_address}"
+        _fit(struct.calcsize(struct_format))
 
     def __get__(
         self,

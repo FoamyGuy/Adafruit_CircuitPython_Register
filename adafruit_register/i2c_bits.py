@@ -21,6 +21,17 @@ try:
 except ImportError:
     pass
 
+# Module-wide I/O buffer shared by every descriptor in this file: [address byte][data ...].
+# Grown *in place* with .extend() (never rebound), so no `global` statement is needed and PLW0603
+# does not fire. Sized to the widest register declared in the image.
+_BUFFER = bytearray(1)
+
+
+def _fit(size: int) -> None:
+    """Grow the shared buffer in place to hold a 1-byte address + ``size`` data bytes."""
+    if len(_BUFFER) < 1 + size:
+        _BUFFER.extend(bytes(1 + size - len(_BUFFER)))
+
 
 class RWBits:
     """
@@ -52,8 +63,9 @@ class RWBits:
         if self.bit_mask >= 1 << (register_width * 8):
             raise ValueError("Cannot have more bits than register size")
         self.lowest_bit = lowest_bit
-        self.buffer = bytearray(1 + register_width)
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.register_width = register_width
+        _fit(register_width)
         self.lsb_first = lsb_first
         self.sign_bit = (1 << (num_bits - 1)) if signed else 0
 
@@ -62,15 +74,18 @@ class RWBits:
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> int:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+            i2c.write_then_readinto(
+                _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.register_width
+            )
         # read the number of bytes into a single variable
         reg = 0
-        order = range(len(self.buffer) - 1, 0, -1)
+        order = range(self.register_width, 0, -1)
         if not self.lsb_first:
             order = reversed(order)
         for i in order:
-            reg = (reg << 8) | self.buffer[i]
+            reg = (reg << 8) | _BUFFER[i]
         reg = (reg & self.bit_mask) >> self.lowest_bit
         # If the value is signed and negative, convert it
         if reg & self.sign_bit:
@@ -79,22 +94,25 @@ class RWBits:
 
     def __set__(self, obj: I2CDeviceDriver, value: int) -> None:
         value <<= self.lowest_bit  # shift the value over to the right spot
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+            i2c.write_then_readinto(
+                _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.register_width
+            )
             reg = 0
-            order = range(len(self.buffer) - 1, 0, -1)
+            order = range(self.register_width, 0, -1)
             if not self.lsb_first:
-                order = range(1, len(self.buffer))
+                order = range(1, self.register_width + 1)
             for i in order:
-                reg = (reg << 8) | self.buffer[i]
+                reg = (reg << 8) | _BUFFER[i]
             # print("old reg: ", hex(reg))
             reg &= ~self.bit_mask  # mask off the bits we're about to change
             reg |= value  # then or in our new value
             # print("new reg: ", hex(reg))
             for i in reversed(order):
-                self.buffer[i] = reg & 0xFF
+                _BUFFER[i] = reg & 0xFF
                 reg >>= 8
-            i2c.write(self.buffer)
+            i2c.write(_BUFFER, end=1 + self.register_width)
 
 
 class ROBits(RWBits):

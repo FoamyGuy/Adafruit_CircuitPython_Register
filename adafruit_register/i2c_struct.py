@@ -23,6 +23,17 @@ try:
 except ImportError:
     pass
 
+# Module-wide I/O buffer shared by every descriptor in this file: [address byte][data ...].
+# Grown *in place* with .extend() (never rebound), so no `global` statement is needed and PLW0603
+# does not fire. Sized to the widest register declared in the image.
+_BUFFER = bytearray(1)
+
+
+def _fit(size: int) -> None:
+    """Grow the shared buffer in place to hold a 1-byte address + ``size`` data bytes."""
+    if len(_BUFFER) < 1 + size:
+        _BUFFER.extend(bytes(1 + size - len(_BUFFER)))
+
 
 class Struct:
     """
@@ -37,22 +48,25 @@ class Struct:
 
     def __init__(self, register_address: int, struct_format: str) -> None:
         self.format = struct_format
-        self.buffer = bytearray(1 + struct.calcsize(self.format))
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.size = struct.calcsize(self.format)
+        _fit(self.size)
 
     def __get__(
         self,
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Tuple:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
-        return struct.unpack_from(self.format, memoryview(self.buffer)[1:])
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
+        return struct.unpack_from(self.format, memoryview(_BUFFER)[1:])
 
     def __set__(self, obj: I2CDeviceDriver, value: Tuple) -> None:
-        struct.pack_into(self.format, self.buffer, 1, *value)
+        _BUFFER[0] = self.address
+        struct.pack_into(self.format, _BUFFER, 1, *value)
         with obj.i2c_device as i2c:
-            i2c.write(self.buffer)
+            i2c.write(_BUFFER, end=1 + self.size)
 
 
 class UnaryStruct:
@@ -68,22 +82,25 @@ class UnaryStruct:
 
     def __init__(self, register_address: int, struct_format: str) -> None:
         self.format = struct_format
-        self.buffer = bytearray(1 + struct.calcsize(self.format))
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.size = struct.calcsize(self.format)
+        _fit(self.size)
 
     def __get__(
         self,
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Any:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
-        return struct.unpack_from(self.format, self.buffer, 1)[0]
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
+        return struct.unpack_from(self.format, _BUFFER, 1)[0]
 
     def __set__(self, obj: I2CDeviceDriver, value: Any) -> None:
-        struct.pack_into(self.format, self.buffer, 1, value)
+        _BUFFER[0] = self.address
+        struct.pack_into(self.format, _BUFFER, 1, value)
         with obj.i2c_device as i2c:
-            i2c.write(self.buffer)
+            i2c.write(_BUFFER, end=1 + self.size)
 
 
 class ROUnaryStruct(UnaryStruct):

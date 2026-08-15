@@ -16,18 +16,7 @@ __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
 import struct
 
-# Module-wide data buffer shared by every descriptor in this file. The accessor owns address
-# framing, so this holds register *data* only (no leading address byte). It is grown *in place*
-# with .extend() (never rebound), so no `global` statement is needed and PLW0603 does not fire;
-# UPPER_CASE marks the binding as constant (the contents change, the name never does). Sized to
-# the widest struct declared in the image.
-_BUFFER = bytearray(0)
-
-
-def _fit(size: int) -> None:
-    """Grow the shared buffer in place to at least ``size`` bytes (no rebind, no `global`)."""
-    if len(_BUFFER) < size:
-        _BUFFER.extend(bytes(size - len(_BUFFER)))
+from adafruit_register import _BUFFER, _fit
 
 
 class Struct:

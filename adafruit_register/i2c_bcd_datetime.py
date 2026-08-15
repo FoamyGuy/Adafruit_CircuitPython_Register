@@ -16,6 +16,8 @@ __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
 import time
 
+from adafruit_register import _BUFFER, _fit
+
 try:
     from typing import Optional, Type
 
@@ -65,8 +67,9 @@ class BCDDateTimeRegister:
         weekday_first: bool = True,
         weekday_start: Literal[0, 1] = 1,
     ) -> None:
-        self.buffer = bytearray(8)
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.size = 7  # second, minute, hour, weekday, day, month, year
+        _fit(self.size)
         if weekday_first:
             self.weekday_offset = 0
         else:
@@ -81,19 +84,19 @@ class BCDDateTimeRegister:
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> time.struct_time:
         # Read and return the date and time.
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
         return time.struct_time(
             (
-                _bcd2bin(self.buffer[7] & self.mask_datetime[7]) + 2000,
-                _bcd2bin(self.buffer[6] & self.mask_datetime[6]),
-                _bcd2bin(self.buffer[5 - self.weekday_offset] & self.mask_datetime[4]),
-                _bcd2bin(self.buffer[3] & self.mask_datetime[3]),
-                _bcd2bin(self.buffer[2] & self.mask_datetime[2]),
-                _bcd2bin(self.buffer[1] & self.mask_datetime[1]),
+                _bcd2bin(_BUFFER[7] & self.mask_datetime[7]) + 2000,
+                _bcd2bin(_BUFFER[6] & self.mask_datetime[6]),
+                _bcd2bin(_BUFFER[5 - self.weekday_offset] & self.mask_datetime[4]),
+                _bcd2bin(_BUFFER[3] & self.mask_datetime[3]),
+                _bcd2bin(_BUFFER[2] & self.mask_datetime[2]),
+                _bcd2bin(_BUFFER[1] & self.mask_datetime[1]),
                 _bcd2bin(
-                    (self.buffer[4 + self.weekday_offset] & self.mask_datetime[5])
-                    - self.weekday_start
+                    (_BUFFER[4 + self.weekday_offset] & self.mask_datetime[5]) - self.weekday_start
                 ),
                 -1,
                 -1,
@@ -101,12 +104,13 @@ class BCDDateTimeRegister:
         )
 
     def __set__(self, obj: I2CDeviceDriver, value: time.struct_time) -> None:
-        self.buffer[1] = _bin2bcd(value.tm_sec) & 0x7F  # format conversions
-        self.buffer[2] = _bin2bcd(value.tm_min)
-        self.buffer[3] = _bin2bcd(value.tm_hour)
-        self.buffer[4 + self.weekday_offset] = _bin2bcd(value.tm_wday + self.weekday_start)
-        self.buffer[5 - self.weekday_offset] = _bin2bcd(value.tm_mday)
-        self.buffer[6] = _bin2bcd(value.tm_mon)
-        self.buffer[7] = _bin2bcd(value.tm_year - 2000)
+        _BUFFER[0] = self.address
+        _BUFFER[1] = _bin2bcd(value.tm_sec) & 0x7F  # format conversions
+        _BUFFER[2] = _bin2bcd(value.tm_min)
+        _BUFFER[3] = _bin2bcd(value.tm_hour)
+        _BUFFER[4 + self.weekday_offset] = _bin2bcd(value.tm_wday + self.weekday_start)
+        _BUFFER[5 - self.weekday_offset] = _bin2bcd(value.tm_mday)
+        _BUFFER[6] = _bin2bcd(value.tm_mon)
+        _BUFFER[7] = _bin2bcd(value.tm_year - 2000)
         with obj.i2c_device:
-            obj.i2c_device.write(self.buffer)
+            obj.i2c_device.write(_BUFFER, end=1 + self.size)

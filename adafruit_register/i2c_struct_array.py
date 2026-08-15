@@ -23,16 +23,7 @@ try:
 except ImportError:
     pass
 
-# Module-wide I/O buffer shared by every struct array in this file: [address byte][element data].
-# Grown *in place* with .extend() (never rebound), so no `global` statement is needed and PLW0603
-# does not fire. Sized to the widest array element declared in the image.
-_BUFFER = bytearray(1)
-
-
-def _fit(size: int) -> None:
-    """Grow the shared buffer in place to hold a 1-byte address + ``size`` data bytes."""
-    if len(_BUFFER) < 1 + size:
-        _BUFFER.extend(bytes(1 + size - len(_BUFFER)))
+from adafruit_register import _BUFFER, _fit
 
 
 class _BoundStructArray:

@@ -14,17 +14,7 @@ Multi bit registers
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
-# Module-wide data buffer shared by every descriptor in this file. The accessor owns address
-# framing, so this holds register *data* only. It is grown *in place* with .extend() (never
-# rebound), so no `global` statement is needed and PLW0603 does not fire. Sized to the widest
-# register declared in the image.
-_BUFFER = bytearray(0)
-
-
-def _fit(width: int) -> None:
-    """Grow the shared buffer in place to at least ``width`` bytes (no rebind, no `global`)."""
-    if len(_BUFFER) < width:
-        _BUFFER.extend(bytes(width - len(_BUFFER)))
+from adafruit_register import _BUFFER, _fit
 
 
 class RWBits:

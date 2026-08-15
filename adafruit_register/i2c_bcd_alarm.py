@@ -16,6 +16,8 @@ __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
 import time
 
+from adafruit_register import _BUFFER, _fit
+
 try:
     from typing import Optional, Tuple, Type
 
@@ -96,8 +98,9 @@ class BCDAlarmTimeRegister:
         if has_seconds:
             buffer_size += 1
         self.has_seconds = has_seconds
-        self.buffer = bytearray(buffer_size)
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.size = buffer_size - 1  # data bytes, excluding the leading address byte
+        _fit(self.size)
         self.weekday_shared = weekday_shared
         self.weekday_start = weekday_start
 
@@ -107,47 +110,48 @@ class BCDAlarmTimeRegister:
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Tuple[time.struct_time, FREQUENCY_T]:
         # Read the alarm register.
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
 
         frequency = None
         i = 1
         seconds = 0
         if self.has_seconds:
-            if (self.buffer[1] & 0x80) != 0:
+            if (_BUFFER[1] & 0x80) != 0:
                 frequency = "secondly"
             else:
                 frequency = "minutely"
-                seconds = _bcd2bin(self.buffer[1] & 0x7F)
+                seconds = _bcd2bin(_BUFFER[1] & 0x7F)
             i = 2
         else:
             frequency = "minutely"
-            seconds = _bcd2bin(self.buffer[i] & 0x7F)
+            seconds = _bcd2bin(_BUFFER[i] & 0x7F)
         minute = 0
-        if (self.buffer[i] & 0x80) == 0:
+        if (_BUFFER[i] & 0x80) == 0:
             frequency = "hourly"
-            minute = _bcd2bin(self.buffer[i] & 0x7F)
+            minute = _bcd2bin(_BUFFER[i] & 0x7F)
 
         hour = 0
-        if (self.buffer[i + 1] & 0x80) == 0:
+        if (_BUFFER[i + 1] & 0x80) == 0:
             frequency = "daily"
-            hour = _bcd2bin(self.buffer[i + 1] & 0x7F)
+            hour = _bcd2bin(_BUFFER[i + 1] & 0x7F)
 
         mday = None
         wday = None
-        if (self.buffer[i + 2] & 0x80) == 0:
+        if (_BUFFER[i + 2] & 0x80) == 0:
             # day of the month
-            if not self.weekday_shared or (self.buffer[i + 2] & 0x40) == 0:
+            if not self.weekday_shared or (_BUFFER[i + 2] & 0x40) == 0:
                 frequency = "monthly"
-                mday = _bcd2bin(self.buffer[i + 2] & 0x3F)
+                mday = _bcd2bin(_BUFFER[i + 2] & 0x3F)
             else:  # weekday
                 frequency = "weekly"
-                wday = _bcd2bin(self.buffer[i + 2] & 0x3F) - self.weekday_start
+                wday = _bcd2bin(_BUFFER[i + 2] & 0x3F) - self.weekday_start
 
         # weekday
-        if not self.weekday_shared and (self.buffer[i + 3] & 0x80) == 0:
+        if not self.weekday_shared and (_BUFFER[i + 3] & 0x80) == 0:
             frequency = "monthly"
-            mday = _bcd2bin(self.buffer[i + 3] & 0x7F)
+            mday = _bcd2bin(_BUFFER[i + 3] & 0x7F)
 
         if mday is not None:
             wday = (mday - 2) % 7
@@ -166,9 +170,10 @@ class BCDAlarmTimeRegister:
     def __set__(self, obj: I2CDeviceDriver, value: Tuple[time.struct_time, FREQUENCY_T]) -> None:
         if len(value) != 2:
             raise ValueError("Value must be sequence of length two")
+        _BUFFER[0] = self.address
         # Turn all components off by default.
-        for i in range(len(self.buffer) - 1):
-            self.buffer[i + 1] = ALARM_COMPONENT_DISABLED
+        for i in range(self.size):
+            _BUFFER[i + 1] = ALARM_COMPONENT_DISABLED
         frequency_name = value[1]
         error_message = f"{frequency_name} is not a supported frequency"
         if frequency_name not in FREQUENCY:
@@ -182,21 +187,21 @@ class BCDAlarmTimeRegister:
         i = 2 if self.has_seconds else 1
 
         if frequency > 0 and self.has_seconds:  # minutely at least
-            self.buffer[1] = _bin2bcd(value[0].tm_sec)
+            _BUFFER[1] = _bin2bcd(value[0].tm_sec)
 
         if frequency > 1:  # hourly at least
-            self.buffer[i] = _bin2bcd(value[0].tm_min)
+            _BUFFER[i] = _bin2bcd(value[0].tm_min)
 
         if frequency > 2:  # daily at least
-            self.buffer[i + 1] = _bin2bcd(value[0].tm_hour)
+            _BUFFER[i + 1] = _bin2bcd(value[0].tm_hour)
 
         if value[1] == "weekly":
             if self.weekday_shared:
-                self.buffer[i + 2] = _bin2bcd(value[0].tm_wday + self.weekday_start) | 0x40
+                _BUFFER[i + 2] = _bin2bcd(value[0].tm_wday + self.weekday_start) | 0x40
             else:
-                self.buffer[i + 3] = _bin2bcd(value[0].tm_wday + self.weekday_start)
+                _BUFFER[i + 3] = _bin2bcd(value[0].tm_wday + self.weekday_start)
         elif value[1] == "monthly":
-            self.buffer[i + 2] = _bin2bcd(value[0].tm_mday)
+            _BUFFER[i + 2] = _bin2bcd(value[0].tm_mday)
 
         with obj.i2c_device:
-            obj.i2c_device.write(self.buffer)
+            obj.i2c_device.write(_BUFFER, end=1 + self.size)

@@ -23,6 +23,8 @@ try:
 except ImportError:
     pass
 
+from adafruit_register import _BUFFER, _fit
+
 
 class _BoundStructArray:
     """
@@ -46,16 +48,16 @@ class _BoundStructArray:
         self.obj = obj
         self.count = count
 
-    def _get_buffer(self, index: int) -> bytearray:
-        """Shared bounds checking and buffer creation."""
+    def _get_buffer(self, index: int) -> memoryview:
+        """Shared bounds checking and buffer setup."""
         if not 0 <= index < self.count:
             raise IndexError()
         size = struct.calcsize(self.format)
-        # We create the buffer every time instead of keeping the buffer (which is 32 bytes at least)
-        # around forever.
-        buf = bytearray(size + 1)
-        buf[0] = self.first_register + size * index
-        return buf
+        # A single module-wide buffer, grown in place to the widest element, is shared across every
+        # struct array and reused on each access -- one persistent buffer rather than a fresh
+        # allocation on every access or a separate buffer kept per descriptor.
+        _BUFFER[0] = self.first_register + size * index
+        return memoryview(_BUFFER)[: size + 1]
 
     def __getitem__(self, index: int) -> Tuple:
         buf = self._get_buffer(index)
@@ -95,6 +97,7 @@ class StructArray:
         self.address = register_address
         self.count = count
         self.array_id = f"_structarray{register_address}"
+        _fit(struct.calcsize(struct_format))
 
     def __get__(
         self,

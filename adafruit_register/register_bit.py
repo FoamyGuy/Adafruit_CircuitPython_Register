@@ -14,6 +14,8 @@ Single bit registers that use RegisterAccessor
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
+from adafruit_register import _BUFFER, _fit
+
 
 class RWBit:
     """
@@ -32,37 +34,34 @@ class RWBit:
         self, register_address: int, bit: int, register_width: int = 1, lsb_first: bool = True
     ):
         self.bit_mask = 1 << (bit % 8)  # the bitmask *within* the byte!
-
         self.address = register_address
-
-        self.buffer = bytearray(register_width)
-
+        self.register_width = register_width  # replaces the per-instance self.buffer
         self.lsb_first = lsb_first
         self.bit_index = bit
         if lsb_first:
             self.byte = bit // 8  # Little-endian: bit 0 in first register byte
         else:
             self.byte = register_width - 1 - (bit // 8)  # Big-endian: bit 0 in last register byte
+        _fit(register_width)
 
     def __get__(self, obj, objtype=None):
-        # read data from register
-        obj.register_accessor.read_register(self.address, self.buffer)
-
+        # read data from register (memoryview bounds the transfer to this register's width)
+        data = memoryview(_BUFFER)[: self.register_width]
+        obj.register_accessor.read_register(self.address, data)
         # check specified bit and return boolean
-        return bool(self.buffer[self.byte] & self.bit_mask)
+        return bool(data[self.byte] & self.bit_mask)
 
     def __set__(self, obj, value):
         # read current data from register
-        obj.register_accessor.read_register(self.address, self.buffer)
-
+        data = memoryview(_BUFFER)[: self.register_width]
+        obj.register_accessor.read_register(self.address, data)
         # update current data with new value
         if value:
-            self.buffer[self.byte] |= self.bit_mask
+            data[self.byte] |= self.bit_mask
         else:
-            self.buffer[self.byte] &= ~self.bit_mask
-
+            data[self.byte] &= ~self.bit_mask
         # write updated data to register
-        obj.register_accessor.write_register(self.address, self.buffer)
+        obj.register_accessor.write_register(self.address, data)
 
 
 class ROBit(RWBit):

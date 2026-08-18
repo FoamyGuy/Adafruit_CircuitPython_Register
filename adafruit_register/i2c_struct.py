@@ -23,6 +23,8 @@ try:
 except ImportError:
     pass
 
+from adafruit_register import _BUFFER, _fit
+
 
 class Struct:
     """
@@ -37,22 +39,25 @@ class Struct:
 
     def __init__(self, register_address: int, struct_format: str) -> None:
         self.format = struct_format
-        self.buffer = bytearray(1 + struct.calcsize(self.format))
-        self.buffer[0] = register_address
+        self.address = register_address
+        self.size = struct.calcsize(self.format)
+        _fit(self.size)
 
     def __get__(
         self,
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Tuple:
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(self.buffer, self.buffer, out_end=1, in_start=1)
-        return struct.unpack_from(self.format, memoryview(self.buffer)[1:])
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
+        return struct.unpack_from(self.format, memoryview(_BUFFER)[1:])
 
     def __set__(self, obj: I2CDeviceDriver, value: Tuple) -> None:
-        struct.pack_into(self.format, self.buffer, 1, *value)
+        _BUFFER[0] = self.address
+        struct.pack_into(self.format, _BUFFER, 1, *value)
         with obj.i2c_device as i2c:
-            i2c.write(self.buffer)
+            i2c.write(_BUFFER, end=1 + self.size)
 
 
 class UnaryStruct:
@@ -69,24 +74,24 @@ class UnaryStruct:
     def __init__(self, register_address: int, struct_format: str) -> None:
         self.format = struct_format
         self.address = register_address
+        self.size = struct.calcsize(self.format)
+        _fit(self.size)
 
     def __get__(
         self,
         obj: Optional[I2CDeviceDriver],
         objtype: Optional[Type[I2CDeviceDriver]] = None,
     ) -> Any:
-        buf = bytearray(1 + struct.calcsize(self.format))
-        buf[0] = self.address
+        _BUFFER[0] = self.address
         with obj.i2c_device as i2c:
-            i2c.write_then_readinto(buf, buf, out_end=1, in_start=1)
-        return struct.unpack_from(self.format, buf, 1)[0]
+            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=1 + self.size)
+        return struct.unpack_from(self.format, _BUFFER, 1)[0]
 
     def __set__(self, obj: I2CDeviceDriver, value: Any) -> None:
-        buf = bytearray(1 + struct.calcsize(self.format))
-        buf[0] = self.address
-        struct.pack_into(self.format, buf, 1, value)
+        _BUFFER[0] = self.address
+        struct.pack_into(self.format, _BUFFER, 1, value)
         with obj.i2c_device as i2c:
-            i2c.write(buf)
+            i2c.write(_BUFFER, end=1 + self.size)
 
 
 class ROUnaryStruct(UnaryStruct):

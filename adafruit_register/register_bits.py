@@ -14,6 +14,8 @@ Multi bit registers
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_Register.git"
 
+from adafruit_register import _BUFFER, _fit
+
 
 class RWBits:
     """
@@ -48,7 +50,7 @@ class RWBits:
         self.lowest_bit = lowest_bit
 
         self.address = register_address
-        self.buffer = bytearray(register_width)
+        self.register_width = register_width  # replaces the per-instance self.buffer
 
         self.lsb_first = lsb_first
         self.sign_bit = (1 << (num_bits - 1)) if signed else 0
@@ -62,15 +64,17 @@ class RWBits:
             self._byte_order = up
             self._reversed_byte_order = down
 
+        _fit(register_width)
+
     def __get__(self, obj, objtype=None):
-        # read data from register
-        obj.register_accessor.read_register(self.address, self.buffer)
+        # read data from register (memoryview bounds the transfer to this register's width)
+        data = memoryview(_BUFFER)[: self.register_width]
+        obj.register_accessor.read_register(self.address, data)
 
         # read the bytes into a single variable, most significant byte first
         reg = 0
-
         for i in self._byte_order:
-            reg = (reg << 8) | self.buffer[i]
+            reg = (reg << 8) | data[i]
 
         # extract integer value from specified bits
         result = (reg & self.bit_mask) >> self.lowest_bit
@@ -83,24 +87,24 @@ class RWBits:
 
     def __set__(self, obj, value):
         # read current data from register
-        obj.register_accessor.read_register(self.address, self.buffer)
+        data = memoryview(_BUFFER)[: self.register_width]
+        obj.register_accessor.read_register(self.address, data)
 
         # shift in integer value to register data
         reg = 0
-
         for i in self._byte_order:
-            reg = (reg << 8) | self.buffer[i]
+            reg = (reg << 8) | data[i]
         shifted_value = value << self.lowest_bit
         reg &= ~self.bit_mask  # mask off the bits we're about to change
         reg |= shifted_value  # then or in our new value
 
         # put data from reg back into buffer, least significant byte first
         for i in self._reversed_byte_order:
-            self.buffer[i] = reg & 0xFF
+            data[i] = reg & 0xFF
             reg >>= 8
 
         # write updated data buffer to the register
-        obj.register_accessor.write_register(self.address, self.buffer)
+        obj.register_accessor.write_register(self.address, data)
 
 
 class ROBits(RWBits):
